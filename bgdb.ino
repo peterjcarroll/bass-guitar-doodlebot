@@ -1,5 +1,6 @@
-//L293D
+#include <Servo.h>
 
+//Driving constants
 const int leftMotor = 0;
 const int rightMotor = 1;
 
@@ -7,12 +8,15 @@ const int moveStop = 0;
 const int moveForward = 1;
 const int moveBackward = 2;
 
+//L293D
 //Motor A
 const int motorPin1 = 5; // Pin 14 of L293
 const int motorPin2 = 6; // Pin 10 of L293
 //Motor B
 const int motorPin3 = 10; // Pin  7 of L293
 const int motorPin4 = 9;  // Pin  2 of L293
+
+Servo penServo;
 
 //This will run only one time.
 void setup()
@@ -23,6 +27,8 @@ void setup()
   pinMode(motorPin2, OUTPUT);
   pinMode(motorPin3, OUTPUT);
   pinMode(motorPin4, OUTPUT);
+
+  penServo.attach(11); //servo is on pin 11
 
   // //Motor Control - Motor A: motorPin1,motorpin2 & Motor B: motorpin3,motorpin4
 
@@ -89,6 +95,10 @@ void loop()
   case 5:
     driveStop();
     break;
+  case 6:
+    int servoPos = promptServoPosition();
+    penServo.write(servoPos);
+    break;
 
   default:    
     break;
@@ -107,15 +117,29 @@ int displayMenu()
   Serial.println("3) Turn left");
   Serial.println("4) Turn right");
   Serial.println("5) Stop");
+  Serial.println("6) Move servo");
   Serial.flush();
 
-  while (!Serial.available())
-  {
-  }                              //Waits for an input on the serial device
+  while (!Serial.available()) {} //Waits for an input on the serial device
   selection = Serial.parseInt(); //Takes the Serial input and looks for an integer
   Serial.flush();
 
   return selection;
+}
+
+int promptServoPosition()
+{
+  int position;
+
+  Serial.println("Enter servo position (0-180):");
+  Serial.flush();
+  delay(5000);
+
+  while (!Serial.available()) {} //Waits for an input on the serial device
+  position = Serial.parseInt(); //Takes the Serial input and looks for an integer
+  Serial.flush();
+
+  return position;
 }
 
 void driveForward()
