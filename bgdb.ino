@@ -1,4 +1,16 @@
 #include <Servo.h>
+#include "arduinoFFT.h"
+ 
+#define SAMPLES 128             //SAMPLES-pt FFT. Must be a base 2 number. Max 128 for Arduino Uno.
+#define SAMPLING_FREQUENCY 2048 //Ts = Based on Nyquist, must be 2 times the highest expected frequency.
+ 
+arduinoFFT FFT = arduinoFFT();
+ 
+unsigned int samplingPeriod;
+unsigned long microSeconds;
+ 
+double vReal[SAMPLES]; //create vector of size SAMPLES to hold real values
+double vImag[SAMPLES]; //create vector of size SAMPLES to hold imaginary values
 
 //Driving constants
 const int leftMotor = 0;
@@ -16,7 +28,13 @@ const int motorPin2 = 6; // Pin 10 of L293
 const int motorPin3 = 10; // Pin  7 of L293
 const int motorPin4 = 9;  // Pin  2 of L293
 
+const int allowedRange = 3;
+double lastNote = 0;
+
 Servo penServo;
+const int penUpPos = 70;
+const int penDownPos = 85;
+const int penDelay = 100;
 
 //This will run only one time.
 void setup()
@@ -71,39 +89,135 @@ void setup()
   // digitalWrite(motorPin3, LOW);
   // digitalWrite(motorPin4, LOW);
 
+  samplingPeriod = round(1000000*(1.0/SAMPLING_FREQUENCY)); //Period in microseconds 
+
   //Starting the serial comm
   Serial.begin(115200);
 }
 
 void loop()
 {
-  int action = displayMenu();
-  switch (action)
-  {
-  case 1:
-    driveForward();
-    break;
-  case 2:
-    driveBackward();
-    break;
-  case 3:
-    driveLeft();
-    break;
-  case 4:
-    driveRight();
-    break;
-  case 5:
-    driveStop();
-    break;
-  case 6:
-    int servoPos = promptServoPosition();
-    penServo.write(servoPos);
-    break;
+  const int turnDelay = 250;
+  const int driveDelay = 500;
 
-  default:    
-    break;
+  double note = waitForNote();
+  Serial.print("***** Found note: ");
+  Serial.println(note);
+
+  if(lastNote == 0) { // No previous notes, start the motors
+    penServo.write(penDownPos); // put the pen down
+    delay(penDelay);
+    driveForward();
+    delay(driveDelay);
+    lastNote = note;
   }
-  delay(1000);
+  else if(lastNote > (note + allowedRange)) // lower note, turn left
+  {
+    driveLeft();
+    delay(turnDelay);
+    driveForward();
+    delay(driveDelay);
+    lastNote = 0;
+  }
+  else if(lastNote < (note - allowedRange)) // higher note, turn right
+  {
+    driveRight();
+    delay(turnDelay);
+    driveForward();
+    delay(driveDelay);
+    lastNote = 0;
+  }
+  else { // same note as last time, go back
+    penServo.write(penUpPos); // bring the pen up
+    delay(penDelay);
+    driveBackward();
+    delay(driveDelay);
+    lastNote = 0;
+  }
+  driveStop();
+
+
+  // int action = displayMenu();
+  // switch (action)
+  // {
+  // case 1:
+  //   driveForward();
+  //   delay(1000);
+  //   break;
+  // case 2:
+  //   driveBackward();
+  //   delay(1000);
+  //   break;
+  // case 3:
+  //   driveLeft();
+  //   delay(1000);
+  //   break;
+  // case 4:
+  //   driveRight();
+  //   delay(1000);
+  //   break;
+  // case 5:
+  //   driveStop();
+  //   delay(1000);
+  //   break;
+  // case 6:
+  //   int servoPos = promptServoPosition();
+  //   penServo.write(servoPos);
+  //   break;
+
+  // default:    
+  //   break;
+  // }
+  
+}
+
+double waitForNote()
+{
+  double lastFreq = 0;
+  int consecutive = 0;
+  
+  while (consecutive < 3)
+  {
+    double freq = getAudioSampleFreq();
+    // Serial.println(freq);
+    if(freq <= lastFreq + allowedRange && freq >= lastFreq - allowedRange)
+    {
+      consecutive++;
+    }
+    else {
+      consecutive = 0;
+    }
+    lastFreq = freq;
+  }
+  return lastFreq;
+}
+
+double getAudioSampleFreq()
+{
+  /*Sample SAMPLES times*/
+  for(int i=0; i<SAMPLES; i++)
+  {
+      microSeconds = micros();    //Returns the number of microseconds since the Arduino board began running the current script. 
+    
+      vReal[i] = analogRead(0); //Reads the value from analog pin 0 (A0), quantize it and save it as a real term.
+      vImag[i] = 0; //Makes imaginary term 0 always
+
+      /*remaining wait time between samples if necessary*/
+      while(micros() < (microSeconds + samplingPeriod))
+      {
+        //do nothing
+      }
+  }
+
+  /*Perform FFT on samples*/
+  FFT.Windowing(vReal, SAMPLES, FFT_WIN_TYP_HAMMING, FFT_FORWARD);
+  FFT.Compute(vReal, vImag, SAMPLES, FFT_FORWARD);
+  FFT.ComplexToMagnitude(vReal, vImag, SAMPLES);
+
+  /*Find peak frequency and print peak*/
+  double peak = FFT.MajorPeak(vReal, SAMPLES, SAMPLING_FREQUENCY);
+  //Serial.println(peak);     //Print out the most dominant frequency.
+  return peak;
 }
 
 int displayMenu()
@@ -118,6 +232,7 @@ int displayMenu()
   Serial.println("4) Turn right");
   Serial.println("5) Stop");
   Serial.println("6) Move servo");
+  Serial.println("7) Sample audio");
   Serial.flush();
 
   while (!Serial.available()) {} //Waits for an input on the serial device
